@@ -1,0 +1,477 @@
+***PROGRAM NAME ::  Z_ROLES_COMPARISON_RPT.
+***DEV :: Zeeshan Fareed
+***Desc:: Roles Comparision Report
+***Func::
+***Date:: 27.Aug.2024
+***TR# ::
+
+REPORT ZRP_ROLES_COMPARISON.
+TABLES: SSCRFIELDS,AGR_1251.
+TYPE-POOLS: SLIS.
+*&---------------------------------------------------------------------*
+*& DATA DECLARATION
+*&---------------------------------------------------------------------*
+*TABLES: sscrfields.
+
+DATA: GT_FILE LIKE TABLE OF ALSMEX_TABLINE WITH HEADER LINE.
+
+
+DATA: IT_1251 TYPE STANDARD TABLE OF  AGR_1251 ,
+      WA_1251 TYPE AGR_1251,
+      XFLAG   TYPE FLAG,
+      YFLAG   TYPE FLAG,
+      ZFLAG   TYPE FLAG,
+      LV_CHK  TYPE STRING,
+      LV_CHK1  TYPE STRING.
+
+
+TYPES : BEGIN OF TY_EOUTPUT,
+        OBJECT   TYPE  AGOBJECT ,
+        FIELD    TYPE  AGRFIELD ,
+        VAL       TYPE   AGVAL ,
+        END OF TY_EOUTPUT.
+
+TYPES : BEGIN OF TY_FINAL,
+
+        AGR_NAME TYPE	 AGR_NAME ,
+        OBJECT   TYPE  AGOBJECT ,
+        FIELD    TYPE  AGRFIELD ,
+        VAL      TYPE   AGVAL ,
+
+        COBJECT	 TYPE  AGOBJECT ,
+        CFIELD    TYPE  AGRFIELD ,
+        CLOW     TYPE   AGVAL ,
+        CHIGH	  TYPE   AGVAL ,
+
+        END OF TY_FINAL.
+
+
+DATA :IT_EOUTPUT TYPE STANDARD TABLE OF TY_EOUTPUT,
+      IT_FINAL   TYPE STANDARD TABLE OF TY_FINAL ,
+      WA_FINAL   TYPE TY_FINAL.
+
+
+DATA : IT_FIELDCAT TYPE  SLIS_T_FIELDCAT_ALV,
+       WA_FIELDCAT TYPE SLIS_FIELDCAT_ALV.
+* For Sorting Definations
+DATA : IT_SORT TYPE SLIS_T_SORTINFO_ALV ,
+       WA_SORT TYPE SLIS_SORTINFO_ALV .
+ DATA: IT_EVENTS TYPE SLIS_T_EVENT,
+        WA_LAYOUT TYPE SLIS_LAYOUT_ALV.
+
+ DATA : LV_POS TYPE I,
+        STR1   TYPE STRING,
+        STR2   TYPE STRING,
+        LV_LEN  TYPE I.
+
+*&---------------------------------------------------------------------*
+*& SELECTION SCREEN
+*&---------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK RO WITH FRAME TITLE TEXT-001.
+  PARAMETERS : P_CHK AS CHECKBOX.
+  SELECTION-SCREEN SKIP 1.
+  SELECT-OPTIONS: SO_ROLE FOR AGR_1251-AGR_NAME.
+
+
+SELECTION-SCREEN END OF BLOCK RO.
+SELECTION-SCREEN BEGIN OF BLOCK F WITH FRAME TITLE TEXT-002.
+  PARAMETERS    : P_FILE LIKE RLGRAP-FILENAME .
+
+SELECTION-SCREEN END OF BLOCK F.
+
+*&---------------------------------------------------------------------*
+*At selection-screen on value-request for p_file.
+AT SELECTION-SCREEN.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR P_FILE.
+
+IF P_FILE IS  INITIAL.
+
+CALL FUNCTION 'KD_GET_FILENAME_ON_F4'
+ EXPORTING
+   PROGRAM_NAME        = SYST-REPID
+*   DYNPRO_NUMBER       = SYST-DYNNR
+*   FIELD_NAME          = ' '
+*   STATIC              = ' '
+*   MASK                = ' '
+  CHANGING
+    FILE_NAME           = P_FILE
+* EXCEPTIONS
+*   MASK_TOO_LONG       = 1
+*   OTHERS              = 2
+          .
+*IF SY-SUBRC <> 0.
+* MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+*         WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+*ENDIF.
+ENDIF.
+
+*&---------------------------------------------------------------------*
+START-OF-SELECTION.
+  PERFORM SUB_GET_EXCEL_DATA.
+  PERFORM GET_DB_RECORDS.
+  PERFORM GET_COMP.
+*&---------------------------------------------------------------------*
+END-OF-SELECTION.
+
+  PERFORM PRINT_ALV.
+
+*&---------------------------------------------------------------------*
+*&      Form  SUB_GET_EXCEL_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM SUB_GET_EXCEL_DATA .
+  DATA: IT_RA TYPE TRUXS_T_TEXT_DATA.
+
+
+  CALL FUNCTION 'TEXT_CONVERT_XLS_TO_SAP'
+    EXPORTING
+      I_FIELD_SEPERATOR    = 'X'
+      I_LINE_HEADER        = 'X'
+      I_TAB_RAW_DATA       = IT_RA
+      I_FILENAME           = P_FILE
+    TABLES
+      I_TAB_CONVERTED_DATA = IT_EOUTPUT
+    EXCEPTIONS
+      CONVERSION_FAILED    = 1
+      OTHERS               = 2.
+  IF SY-SUBRC <> 0.
+    MESSAGE E007(ZHCM).
+  ENDIF.
+ENDFORM.
+
+
+
+
+*&---------------------------------------------------------------------*
+*&      Form  GET_DB_RECORDS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM GET_DB_RECORDS .
+REFRESH IT_1251.
+SELECT * FROM AGR_1251 INTO
+ TABLE IT_1251
+ WHERE AGR_NAME IN SO_ROLE
+ AND DELETED NE 'X'.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  GET_COMP
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM GET_COMP .
+
+LOOP AT IT_1251 ASSIGNING FIELD-SYMBOL(<FS_1251>).
+
+LOOP AT IT_EOUTPUT ASSIGNING FIELD-SYMBOL(<FS_EOUTPUT>).
+
+*----------------------------------------------------------------------*
+IF <FS_EOUTPUT>-OBJECT = <FS_1251>-OBJECT.
+
+ XFLAG = 'X'.
+
+ELSE.
+
+CLEAR : LV_CHK ,LV_CHK1, LV_POS, STR1 ,STR2 ,LV_LEN.
+
+LV_CHK = <FS_EOUTPUT>-OBJECT .
+REPLACE '*'  IN LV_CHK WITH '%'.
+SEARCH LV_CHK FOR '%'.
+
+IF SY-SUBRC = 0.
+*** first string
+LV_LEN = STRLEN( LV_CHK ).
+FIND '%' IN LV_CHK MATCH OFFSET LV_POS.
+*LV_POS = LV_POS + 1.
+
+**** string comapare
+LV_CHK1 = <FS_1251>-OBJECT+0(LV_LEN).
+REPLACE SECTION OFFSET LV_POS OF LV_CHK1 WITH '%'.
+
+IF LV_CHK = LV_CHK1.
+XFLAG = 'X'.
+ENDIF.
+
+ENDIF.
+
+ENDIF.
+*----------------------------------------------------------------------*
+IF <FS_EOUTPUT>-FIELD = <FS_1251>-FIELD.
+
+ YFLAG = 'X'.
+
+ENDIF.
+*----------------------------------------------------------------------*
+**** VALUE CHECK
+IF <FS_EOUTPUT>-VAL = <FS_1251>-LOW.
+
+ ZFLAG = 'X'.
+
+ELSE.
+CLEAR : LV_CHK ,LV_CHK1, LV_POS, STR1 ,STR2 ,LV_LEN.
+
+LV_CHK = <FS_1251>-LOW.
+REPLACE '*'  IN LV_CHK WITH '%'.
+SEARCH LV_CHK FOR '%'.
+
+IF SY-SUBRC = 0.
+*** first string
+LV_LEN = STRLEN( LV_CHK ).
+FIND '%' IN LV_CHK MATCH OFFSET LV_POS.
+
+IF LV_LEN = '1'.
+ZFLAG = 'X'.
+ENDIF.
+
+
+**** string comapare
+LV_CHK1 = <FS_EOUTPUT>-VAL+0(LV_LEN).
+REPLACE SECTION OFFSET LV_POS OF LV_CHK1 WITH '%'.
+
+IF LV_CHK = LV_CHK1.
+ZFLAG = 'X'.
+ENDIF.
+
+***** CHECK HIGH AND LOW VALUES
+*lv chk is low  values
+STR1 = LV_CHK.
+
+STR2 = <FS_1251>-HIGH.
+REPLACE '*'  IN STR2 WITH '%'.
+SEARCH STR2 FOR '%'.
+
+IF SY-SUBRC = 0.
+*** first string
+LV_LEN = STRLEN( STR2 ).
+FIND '%' IN STR2 MATCH OFFSET LV_POS.
+ENDIF.
+
+
+IF STR1 IS NOT INITIAL AND
+   STR2 IS NOT INITIAL.
+
+IF LV_CHK1  >=  STR1 AND
+   LV_CHK1 <=  STR2 .
+
+ZFLAG = 'X'.
+ENDIF.
+
+ENDIF.
+
+ENDIF.
+ENDIF.
+*----------------------------------------------------------------------*
+
+IF P_CHK = ' ' .
+IF XFLAG = 'X' AND YFLAG = 'X' AND ZFLAG = 'X'.
+
+WA_FINAL-AGR_NAME  =  <FS_1251>-AGR_NAME .
+WA_FINAL-OBJECT    = <FS_1251>-OBJECT .
+WA_FINAL-FIELD     =  <FS_1251>-FIELD.
+WA_FINAL-CLOW     = <FS_1251>-LOW.
+WA_FINAL-CHIGH   =  <FS_1251>-HIGH.
+
+
+WA_FINAL-COBJECT  =  <FS_EOUTPUT>-OBJECT.
+WA_FINAL-CFIELD   = <FS_EOUTPUT>-FIELD.
+WA_FINAL-VAL       = <FS_EOUTPUT>-VAL.
+
+APPEND WA_FINAL TO IT_FINAL.
+ENDIF.
+
+ELSE.
+
+IF XFLAG = 'X' AND YFLAG = 'X' AND ZFLAG = ''.
+
+WA_FINAL-AGR_NAME  =  <FS_1251>-AGR_NAME .
+WA_FINAL-OBJECT    = <FS_1251>-OBJECT .
+WA_FINAL-FIELD     =  <FS_1251>-FIELD.
+WA_FINAL-CLOW     = <FS_1251>-LOW.
+WA_FINAL-CHIGH   =  <FS_1251>-HIGH.
+
+
+WA_FINAL-COBJECT  =  <FS_EOUTPUT>-OBJECT.
+WA_FINAL-CFIELD   = <FS_EOUTPUT>-FIELD.
+WA_FINAL-VAL       = <FS_EOUTPUT>-VAL.
+
+APPEND WA_FINAL TO IT_FINAL.
+ENDIF.
+
+
+ENDIF.
+*----------------------------------------------------------------------*
+CLEAR : XFLAG , YFLAG , ZFLAG  , WA_FINAL.
+ENDLOOP.
+ENDLOOP.
+
+
+SORT IT_FINAL BY AGR_NAME OBJECT FIELD ASCENDING.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  PRINT_ALV
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM PRINT_ALV .
+REFRESH IT_FIELDCAT.
+
+IF IT_FINAL IS INITIAL.
+MESSAGE 'No Records Found! Please Search for Other Combination' TYPE 'I' DISPLAY LIKE 'I'.
+LEAVE LIST-PROCESSING.
+ENDIF.
+
+PERFORM SUB_CREATE_FIELDCAT.
+WA_LAYOUT-COLWIDTH_OPTIMIZE = 'X'.
+WA_LAYOUT-ZEBRA = 'X'.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+*     I_INTERFACE_CHECK       = ' '
+*     I_BYPASSING_BUFFER      = ' '
+*     I_BUFFER_ACTIVE         = ' '
+      I_CALLBACK_PROGRAM      = SY-REPID
+*     I_CALLBACK_PF_STATUS_SET          = ' '
+*      I_CALLBACK_USER_COMMAND = 'USER_COMMAND'
+*      I_CALLBACK_TOP_OF_PAGE  = 'TOP-OF-PAGE'
+*     I_CALLBACK_HTML_TOP_OF_PAGE       = ' '
+*     I_CALLBACK_HTML_END_OF_LIST       = ' '
+*     I_STRUCTURE_NAME        =
+*     I_BACKGROUND_ID         = ' '
+*     I_GRID_TITLE            = 'MATERIAL LIST FOR SALEABLE MATERIAL'
+*     I_GRID_SETTINGS         =
+      IS_LAYOUT               = WA_LAYOUT
+      IT_FIELDCAT             = IT_FIELDCAT
+*     IT_EXCLUDING            =
+*     IT_SPECIAL_GROUPS       =
+*     IT_SORT                 =
+*     IT_FILTER               =
+*     IS_SEL_HIDE             =
+*     I_DEFAULT               = 'X'
+*     I_SAVE                  = ' '
+*     IS_VARIANT              =
+*     IT_EVENTS               =
+*     IT_EVENT_EXIT           =
+*     IS_PRINT                =
+*     IS_REPREP_ID            =
+*     I_SCREEN_START_COLUMN   = 0
+*     I_SCREEN_START_LINE     = 0
+*     I_SCREEN_END_COLUMN     = 0
+*     I_SCREEN_END_LINE       = 0
+*     I_HTML_HEIGHT_TOP       = 0
+*     I_HTML_HEIGHT_END       = 0
+*     IT_ALV_GRAPHICS         =
+*     IT_HYPERLINK            =
+*     IT_ADD_FIELDCAT         =
+*     IT_EXCEPT_QINFO         =
+*     IR_SALV_FULLSCREEN_ADAPTER        =
+* IMPORTING
+*     E_EXIT_CAUSED_BY_CALLER =
+*     ES_EXIT_CAUSED_BY_USER  =
+    TABLES
+      T_OUTTAB                = IT_FINAL
+* EXCEPTIONS
+*     PROGRAM_ERROR           = 1
+*     OTHERS                  = 2
+    .
+*IF SY-SUBRC = 0.
+* MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+*         WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+*ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SUB_CREATE_FIELDCAT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM SUB_CREATE_FIELDCAT .
+* material type
+  WA_FIELDCAT-TABNAME  =  'IT_FINAL'.
+  WA_FIELDCAT-FIELDNAME  = 'COBJECT'.
+  WA_FIELDCAT-SELTEXT_L  = 'Checked Object'.
+  WA_FIELDCAT-COL_POS    = 10.
+  WA_FIELDCAT-EMPHASIZE = 'C111'.
+  APPEND WA_FIELDCAT TO IT_FIELDCAT.
+  CLEAR WA_FIELDCAT.
+
+* material
+  WA_FIELDCAT-TABNAME  =  'IT_FINAL'.
+  WA_FIELDCAT-FIELDNAME  = 'CFIELD'.
+  WA_FIELDCAT-SELTEXT_L  = 'Checked Field'.
+  WA_FIELDCAT-COL_POS    = 20.
+  WA_FIELDCAT-EMPHASIZE = 'C111'.
+  APPEND WA_FIELDCAT TO IT_FIELDCAT.
+  CLEAR WA_FIELDCAT.
+
+* old material
+  WA_FIELDCAT-TABNAME  =  'IT_FINAL'.
+  WA_FIELDCAT-FIELDNAME  = 'VAL'.
+  WA_FIELDCAT-SELTEXT_L  = 'Checked Value'.
+  WA_FIELDCAT-COL_POS    = 30.
+  WA_FIELDCAT-EMPHASIZE = 'C111'.
+  APPEND WA_FIELDCAT TO IT_FIELDCAT.
+  CLEAR WA_FIELDCAT.
+
+
+
+  WA_FIELDCAT-TABNAME  =  'IT_FINAL'.
+  WA_FIELDCAT-FIELDNAME  = 'AGR_NAME'.
+  WA_FIELDCAT-SELTEXT_L  = 'Role Name'.
+  WA_FIELDCAT-COL_POS    = 40.
+  WA_FIELDCAT-EMPHASIZE = 'C111'.
+  APPEND WA_FIELDCAT TO IT_FIELDCAT.
+  CLEAR WA_FIELDCAT.
+
+  WA_FIELDCAT-TABNAME  =  'IT_FINAL'.
+  WA_FIELDCAT-FIELDNAME  = 'OBJECT'.
+  WA_FIELDCAT-SELTEXT_L  = 'Object'.
+  WA_FIELDCAT-COL_POS    = 50.
+  WA_FIELDCAT-EMPHASIZE = 'C111'.
+  APPEND WA_FIELDCAT TO IT_FIELDCAT.
+  CLEAR WA_FIELDCAT.
+
+  WA_FIELDCAT-TABNAME  =  'IT_FINAL'.
+  WA_FIELDCAT-FIELDNAME  = 'FIELD'.
+  WA_FIELDCAT-SELTEXT_L  = 'Field'.
+  WA_FIELDCAT-COL_POS    = 60.
+  WA_FIELDCAT-EMPHASIZE = 'C111'.
+  APPEND WA_FIELDCAT TO IT_FIELDCAT.
+  CLEAR WA_FIELDCAT.
+  " RBOM
+  WA_FIELDCAT-TABNAME  =  'IT_FINAL'.
+  WA_FIELDCAT-FIELDNAME  = 'CLOW'.
+  WA_FIELDCAT-SELTEXT_L  = 'From'.
+  WA_FIELDCAT-COL_POS    = 70.
+  WA_FIELDCAT-EMPHASIZE = 'C111'.
+
+  APPEND WA_FIELDCAT TO IT_FIELDCAT.
+  CLEAR WA_FIELDCAT.
+* fff class
+  WA_FIELDCAT-TABNAME  =  'IT_FINAL'.
+  WA_FIELDCAT-FIELDNAME  = 'CHIGH'.
+  WA_FIELDCAT-SELTEXT_L  = 'TO'.
+  WA_FIELDCAT-COL_POS    = 80.
+  WA_FIELDCAT-EMPHASIZE = 'C111'.
+  APPEND WA_FIELDCAT TO IT_FIELDCAT.
+  CLEAR WA_FIELDCAT.
+
+* oem no
+
+ENDFORM.
